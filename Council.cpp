@@ -1,7 +1,18 @@
 #include <iostream>
+
 #include <string>
 
 #include "MyCouncilVisitor.h"
+
+#include "llvm/MC/TargetRegistry.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Host.h"
+#include "llvm/Support/TargetSelect.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetOptions.h"
+
+#include "llvm/IR/LegacyPassManager.h"
 
 #include "antlr4/CouncilLexer.h"
 #include "antlr4/CouncilVisitor.h"
@@ -30,11 +41,48 @@ int main(int argc, const char* argv[]){
 
 	CouncilParser::ParseFileContext* tree = parser.parseFile();
 
-	cout << "-=- Starting Compiling -=-";
+	cout << "-=- Starting Compiling -=-" << endl;
 
 	MyCouncilVisitor visitor(out_path);
 	visitor.visitParseFile(tree);
 
+	coun::llvmModule.dump();
+
 	cout << "-=-  Ending Compiling  -=-" << endl;
+
+    // actually generate object file.
+	auto target_triple = sys::getDefaultTargetTriple();
+    InitializeAllTargetInfos();
+    InitializeAllTargets();
+    InitializeAllTargetMCs();
+    InitializeAllAsmParsers();
+    InitializeAllAsmPrinters();
+    
+    string error;
+    std::error_code ec;
+
+    auto target = TargetRegistry::lookupTarget(target_triple, error);
+    
+    auto cpu = "generic";
+    auto features = "";
+
+    TargetOptions opt;
+    auto RM = Optional<Reloc::Model>();
+    auto target_machine = target->createTargetMachine(target_triple, cpu, features, opt, RM);
+
+    coun::llvmModule.setDataLayout(target_machine->createDataLayout());
+    coun::llvmModule.setTargetTriple(target_triple);
+    
+   // raw_fd_ostream out_file(out_file, ec, sys::fs::OF_None);
+    if (ec) {
+        std::cout << "Could not open: " << ec.message();
+        return 1;
+    }
+
+    legacy::PassManager pass;
+    auto fileType = CGFT_ObjectFile;
+
+    
+
 	return 0;
 }

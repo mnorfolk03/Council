@@ -29,6 +29,10 @@ class MyCouncilVisitor : public CouncilVisitor {
 			file_out.open(path, ios::out);
 		}
 
+        VarType typeFromContext(CouncilParser::TypeContext *ctx){
+            return any_cast<VarType>(visit(ctx));
+        }
+
 		virtual std::any visitParseFile(CouncilParser::ParseFileContext *ctx) override {
 			return visitChildren(ctx);
 		}
@@ -65,7 +69,35 @@ class MyCouncilVisitor : public CouncilVisitor {
 		}
 
 		virtual std::any visitDecFunc(CouncilParser::DecFuncContext *ctx) override {
-			return visitChildren(ctx);
+			
+            auto id_vec = ctx->ID();
+            auto it_ids = id_vec.begin();
+           
+			string func_name = (*(it_ids))->getText(); // THIS LINE
+
+            auto types_vec = ctx->type();
+            auto it_types = types_vec.begin();
+			// TODO finish this
+			VarType return_type = typeFromContext(*it_types);
+						
+			it_ids++;
+			it_types++;
+			
+			vector<string> param_names;
+			vector<VarType> param_types;
+			for (; it_ids != id_vec.end(); it_ids++, it_types++) {
+				param_names.push_back((*it_ids)->getText());
+				param_types.push_back(typeFromContext(*it_types));
+                cout << typeFromContext(*it_types) << endl;
+			}
+			
+			CodeBlockAst* body = any_cast<CodeBlockAst*>(visitCodeBlock(ctx->codeBlock()));
+			if (!body->hasReturn()){
+				logError(ParsingException("Funcion '" + func_name + "' may be missing return!"));
+			}
+			FunctionAst * func = new FunctionAst(func_name, return_type, body, param_names, param_types);
+			func->code();
+			return func;
 		}
 
 		virtual std::any visitPreMinusExpr(CouncilParser::PreMinusExprContext *ctx) override {
@@ -142,11 +174,30 @@ class MyCouncilVisitor : public CouncilVisitor {
 		}
 
 		virtual std::any visitReturnStmt(CouncilParser::ReturnStmtContext *ctx) override {
-			return visitChildren(ctx);
+			return new ReturnAst(any_cast<ExprAst*>(visit(ctx->expr())));
 		}
 
 		virtual std::any visitIfChain(CouncilParser::IfChainContext *ctx) override {
-			return visitChildren(ctx);
+	    vector<ExprAst*> exprs;
+        vector<CodeBlockAst*> blocks;
+        
+        auto ctx_exprs = ctx->expr();
+        auto ctx_blocks = ctx->codeBlock();
+        
+        auto expr_it = ctx_exprs.begin();
+        auto blocks_it = ctx_blocks.begin();
+
+        for (; expr_it != ctx_exprs.end(); expr_it++, blocks_it++) {
+            exprs.push_back(any_cast<ExprAst*>(visit(*expr_it)));
+            blocks.push_back(any_cast<CodeBlockAst*>(visit(*blocks_it)));
+        }
+
+        // check if there is an "else" clause
+	    if (blocks_it != ctx_blocks.end()){
+            blocks.push_back(any_cast<CodeBlockAst*>(visit(*blocks_it)));
+        }
+    
+	return visitChildren(ctx);
 		}
 
 		virtual std::any visitWhileLoop(CouncilParser::WhileLoopContext *ctx) override {
@@ -178,11 +229,45 @@ class MyCouncilVisitor : public CouncilVisitor {
 		}
 
 		virtual std::any visitCodeBlock(CouncilParser::CodeBlockContext *ctx) override {
-			return visitChildren(ctx);
+			auto codelines = ctx->codeLine();
+			
+			vector<CodelineAst*> codelines_ast;
+
+			for (auto it = codelines.begin(); it != codelines.end(); it++){
+				CodelineAst* line = any_cast<CodelineAst*>(visit(*it));
+                if (line == nullptr) // TODO take this out
+                    continue;
+				if (line->type() == CodelineType::RETURN_STMT) {
+					
+					// if this return stmt is not the last thing
+					// in the function call, throw an error!
+					if (next(it) != codelines.end()){
+						logError(ParsingException("unreachable code after return."));
+					}
+					return new CodeBlockAst(codelines_ast, static_cast<ReturnAst*>(line));
+				} else {
+					codelines_ast.push_back(line);
+				}
+			}
+			return new CodeBlockAst(codelines_ast);
 		}
 
 		virtual std::any visitCodeLine(CouncilParser::CodeLineContext *ctx) override {
-			return visitChildren(ctx);
+			if (ctx->decVar() != NULL) {
+				// TODO add
+			} else if (ctx->assignVar() != NULL) {
+				// TODO
+			} else if (ctx->funcCall() != NULL) {
+				// TODO
+			} else if (ctx->returnStmt() != NULL) {
+				return (CodelineAst*) any_cast<ReturnAst*>(visit(ctx->returnStmt()));
+			} else if (ctx->ifChain() != NULL) {
+				// TODO
+			}
+			 
+			logError(ParsingException("visitCodeLine, unreachable state."));
+			return (CodelineAst*) nullptr;
+			
 		}
 
 		virtual std::any visitLiteral(CouncilParser::LiteralContext *ctx) override {
@@ -201,7 +286,8 @@ class MyCouncilVisitor : public CouncilVisitor {
 			else if (ctx->FALSE()!=NULL)
 				return (ExprAst*) new LitBoolAst(false);
 			
-			throw ParsingException("visitLiteral, unreachable state.");
+			logError(ParsingException("visitLiteral, unreachable state."));
+			return (ExprAst*) nullptr;
 		}
 
 

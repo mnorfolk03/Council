@@ -1,7 +1,18 @@
 #pragma once
 
 #include <iostream>
+#include <vector>
 
+std::vector<std::exception> errors;
+void logError(std::exception ex) {
+	errors.push_back(ex);
+}
+
+void printErrors() {
+	for (auto it = errors.begin(); it != errors.end(); it++){
+		std::cout << it->what() << std::endl;
+	}
+}
 
 // A class for throwing exceptions while traversing the parse tree
 class ParsingException : public std::exception {
