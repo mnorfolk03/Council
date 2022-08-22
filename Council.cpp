@@ -73,15 +73,22 @@ int main(int argc, const char* argv[]){
     coun::llvmModule.setDataLayout(target_machine->createDataLayout());
     coun::llvmModule.setTargetTriple(target_triple);
     
-   // raw_fd_ostream out_file(out_file, ec, sys::fs::OF_None);
+    raw_fd_ostream out_file_fd(out_path, ec, sys::fs::OF_None);
     if (ec) {
         std::cout << "Could not open: " << ec.message();
         return 1;
     }
 
     legacy::PassManager pass;
-    auto fileType = CGFT_ObjectFile;
-
+    auto file_type = CGFT_ObjectFile;
+    if (target_machine->addPassesToEmitFile(pass, out_file_fd, nullptr, file_type)) {
+        std::cout << "TargetMachine cannot emit a file of this type" << std::endl;
+        return 1;
+    }
+        pass.run(coun::llvmModule);
+        out_file_fd.flush();
+        std::cout << "Wrote Successfully!" << std::endl;
+    
     
 
 	return 0;

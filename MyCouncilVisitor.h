@@ -59,7 +59,7 @@ class MyCouncilVisitor : public CouncilVisitor {
 
 		virtual std::any visitDecVar(CouncilParser::DecVarContext *ctx) override {
 			VarType type = std::any_cast<VarType>(visit(ctx->type()));
-			cout << "declaration!" << endl;
+
 			visit(ctx->assignVar());
 			return NULL;
 		}
@@ -88,7 +88,7 @@ class MyCouncilVisitor : public CouncilVisitor {
 			for (; it_ids != id_vec.end(); it_ids++, it_types++) {
 				param_names.push_back((*it_ids)->getText());
 				param_types.push_back(typeFromContext(*it_types));
-                cout << typeFromContext(*it_types) << endl;
+
 			}
 			
 			CodeBlockAst* body = any_cast<CodeBlockAst*>(visitCodeBlock(ctx->codeBlock()));
@@ -196,8 +196,8 @@ class MyCouncilVisitor : public CouncilVisitor {
 	    if (blocks_it != ctx_blocks.end()){
             blocks.push_back(any_cast<CodeBlockAst*>(visit(*blocks_it)));
         }
-    
-	return visitChildren(ctx);
+        
+	    return new IfChain(exprs, blocks);
 		}
 
 		virtual std::any visitWhileLoop(CouncilParser::WhileLoopContext *ctx) override {
@@ -232,7 +232,8 @@ class MyCouncilVisitor : public CouncilVisitor {
 			auto codelines = ctx->codeLine();
 			
 			vector<CodelineAst*> codelines_ast;
-
+            
+            
 			for (auto it = codelines.begin(); it != codelines.end(); it++){
 				CodelineAst* line = any_cast<CodelineAst*>(visit(*it));
                 if (line == nullptr) // TODO take this out
@@ -263,6 +264,7 @@ class MyCouncilVisitor : public CouncilVisitor {
 				return (CodelineAst*) any_cast<ReturnAst*>(visit(ctx->returnStmt()));
 			} else if (ctx->ifChain() != NULL) {
 				// TODO
+                return (CodelineAst*) any_cast<IfChain*>(visit(ctx->ifChain()));
 			}
 			 
 			logError(ParsingException("visitCodeLine, unreachable state."));

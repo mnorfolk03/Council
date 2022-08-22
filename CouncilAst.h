@@ -24,12 +24,14 @@
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Verifier.h"
 
+#include "llvm/IR/NoFolder.h" // TODO REMOVE THIS
+
 using namespace llvm;
 
 namespace coun {
 
 	static LLVMContext ctx;
-	static IRBuilder<> builder(ctx);
+	static IRBuilder<NoFolder> builder(ctx);
 	static Module llvmModule("Council", ctx);
 	enum VarType {
 		INT_T,
@@ -253,6 +255,9 @@ namespace coun {
 		public:
 		virtual ~CodelineAst(){}
 		virtual CodelineType type(){return CodelineType::ERROR_TYPE;};
+        
+        // generate's a line, but returns nothing.
+        virtual void generate_line()=0;
 	};
 
 	// the class used for the return line. This is important, because 
@@ -267,6 +272,10 @@ namespace coun {
 			}
 			
 			Value* returnValue(){return ret_val->code();}
+
+            virtual void generate_line(){
+                builder.CreateRet(ret_val->code());
+            }
 		private:
 			ExprAst* ret_val;
 	};
@@ -282,12 +291,19 @@ namespace coun {
 
 			BasicBlock* createBlock(Function* parent = nullptr) {
 				block = BasicBlock::Create(ctx, "blockEntry", parent);
-
+                std::cout << "creating block" << std::endl;
 				// TODO MORE
+                for (auto codeline : codelines) {
+                    codeline->generate_line();
+                }
 
 				return block;
 			}
-			BasicBlock* block;
+            // returns the basic block if createBlock has been called,
+            // otherwise returns nullptr.
+			BasicBlock* fetchBlockIfCreated(){
+                return block;
+            }
 
 			virtual ~CodeBlockAst() {
 				delete return_stmt;
@@ -304,6 +320,7 @@ namespace coun {
 		private:
 			ReturnAst* return_stmt;
 			std::vector<CodelineAst*> codelines;
+            BasicBlock* block = nullptr;
 	};
 
 	class FunctionAst {
@@ -321,7 +338,6 @@ namespace coun {
 				std::vector<Type*> args;
 				for (auto it = arg_types.begin(); it != arg_types.end(); it++) {
 					args.push_back(convertType(*it));
-                    std::cout << convertType(*it) << std::endl;
 				}
                 
                 
@@ -344,7 +360,6 @@ namespace coun {
 				for (; arg_names_it != arg_names.end();) {
                     
     
-                    std::cout << *arg_names_it << std::endl;
 					llvm_arg_it->setName(*arg_names_it);
 					DeclareVarAst(*arg_types_it, *arg_names_it);
 					arg_names_it++;
@@ -352,9 +367,11 @@ namespace coun {
                     llvm_arg_it++;
 				}				
 				
-				BasicBlock* bb = BasicBlock::Create(ctx, "funcEntry", f);
+				BasicBlock* bb = body->createBlock(f);
 				builder.SetInsertPoint(bb);
 				
+                
+
 				if (body->hasReturn()) {
 					builder.CreateRet(body->returnValue());
 				} else { 
@@ -380,6 +397,7 @@ namespace coun {
 
     class IfChain : public CodelineAst {
         public:
+            IfChain(std::vector<ExprAst*> exprs, std::vector<CodeBlockAst*> blocks) : exprs(exprs), blocks(blocks) {std::cout << "made ifChain" << std::endl;}
             virtual CodelineType type(){return CodelineType::IF_CHAIN;}
             virtual ~IfChain(){
                 for (auto expr : exprs){
@@ -389,12 +407,25 @@ namespace coun {
                     delete block;
                 }
             }
-            Value* code() {
-                std::vector<Value*> expr_values;
-                
-                for (auto expr : exprs){
-                    Value* expr_value = expr->code();
-                    switch (expr->type()){
+            virtual void generate_line() {     
+                std::cout << "if:generate_line()" << std::endl;
+
+                Function * parent = builder.GetInsertBlock()->getParent();
+
+                std::vector<BasicBlock*> basic_blocks;
+                BasicBlock* if_exit = BasicBlock::Create(ctx, "if_exit", parent);
+                for (auto block : blocks) {
+                    basic_blocks.push_back(block->createBlock(parent));
+                }
+                basic_blocks.push_back(if_exit);
+
+                std::vector<BasicBlock*> fall_through;
+
+                for (int i = 0; i < exprs.size(); i++) {
+                    
+                    // Fix type of Expr to become a Bool.
+                    Value* expr_value = exprs[i]->code();
+                    switch (exprs[i]->type()){
                         case VarType::INT_T:
                         expr_value = builder.CreateICmpNE(expr_value, ConstantInt::get(ctx, llvm::APInt(32, 0, true)), "intToBool");
                         break;
@@ -402,9 +433,24 @@ namespace coun {
                         expr_value = builder.CreateFCmpONE(expr_value, ConstantFP::get(ctx, APFloat(0.0)), "floatToBool");
                         break;
                     }
+                    
+                    // if we are at the last one, we either want the else
+                    // clause or to go to if_exit. Either way, the 
+                    // basicblocks[i+1] will be this desired value
+                    if (i < exprs.size() - 1) {
+                        BasicBlock * fall_through = BasicBlock::Create(ctx, "fallThrough", parent);
+                        builder.CreateCondBr(expr_value, basic_blocks[i], fall_through);
+                        builder.SetInsertPoint(fall_through);
+                    } else { // else or if_exit
+                        builder.CreateCondBr(expr_value, basic_blocks[i], basic_blocks[i+1]);
+                    }
+                }
+                for (auto block : blocks){
+                    builder.SetInsertPoint(block->fetchBlockIfCreated());
+                    builder.CreateBr(if_exit);
                 }
  
-                return nullptr;
+                return;
             } 
             
                         
