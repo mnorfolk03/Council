@@ -293,9 +293,12 @@ namespace coun {
 				block = BasicBlock::Create(ctx, "blockEntry", parent);
                 std::cout << "creating block" << std::endl;
 				// TODO MORE
+                builder.SetInsertPoint(block);
                 for (auto codeline : codelines) {
                     codeline->generate_line();
                 }
+                if (return_stmt != nullptr)
+                    builder.CreateRet(return_stmt->returnValue());
 
 				return block;
 			}
@@ -371,7 +374,7 @@ namespace coun {
 				builder.SetInsertPoint(bb);
 				
                 
-
+/*
 				if (body->hasReturn()) {
 					builder.CreateRet(body->returnValue());
 				} else { 
@@ -382,6 +385,7 @@ namespace coun {
 					Value * ret_val = ConstantInt::get(ctx, llvm::APInt(32, 0, true));
 					builder.CreateRet(ret_val);
 				}
+*/
 				verifyFunction(*f);
 
 				return f;
@@ -411,16 +415,23 @@ namespace coun {
                 std::cout << "if:generate_line()" << std::endl;
 
                 Function * parent = builder.GetInsertBlock()->getParent();
+                BasicBlock * enter_if = builder.GetInsertBlock();
 
                 std::vector<BasicBlock*> basic_blocks;
                 BasicBlock* if_exit = BasicBlock::Create(ctx, "if_exit", parent);
+                
                 for (auto block : blocks) {
                     basic_blocks.push_back(block->createBlock(parent));
+                    if (!block->hasReturn())
+                        builder.CreateBr(if_exit);
                 }
+
+                builder.SetInsertPoint(enter_if);
+
                 basic_blocks.push_back(if_exit);
-
+                
                 std::vector<BasicBlock*> fall_through;
-
+                
                 for (int i = 0; i < exprs.size(); i++) {
                     
                     // Fix type of Expr to become a Bool.
@@ -442,13 +453,16 @@ namespace coun {
                         builder.CreateCondBr(expr_value, basic_blocks[i], fall_through);
                         builder.SetInsertPoint(fall_through);
                     } else { // else or if_exit
+                        std::cout << "This should execute only once!" << std::endl;
                         builder.CreateCondBr(expr_value, basic_blocks[i], basic_blocks[i+1]);
+                        builder.SetInsertPoint(basic_blocks[i+1]);
                     }
+                    std::cout << "in loop" << std::endl;
                 }
+/*
                 for (auto block : blocks){
                     builder.SetInsertPoint(block->fetchBlockIfCreated());
-                    builder.CreateBr(if_exit);
-                }
+                }*/
  
                 return;
             } 
