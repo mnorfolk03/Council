@@ -10,8 +10,8 @@ void logError(std::exception ex) {
 }
 
 void printErrors() {
-    for (auto it = errors.begin(); it != errors.end(); it++) {
-        std::cout << it->what() << std::endl;
+    for (auto &error: errors) {
+        std::cout << error.what() << std::endl;
     }
 }
 
@@ -42,4 +42,19 @@ public:
 
 private:
     const std::string &cause;
+};
+
+class MisMatchTypeException : public std::exception {
+public:
+    const char *what() const _GLIBCXX_TXN_SAFE_DYN _GLIBCXX_NOTHROW override {
+        return exception::what();
+    }
+};
+
+class IllegalStateException : public std::exception {
+
+public:
+    const char *what() const _GLIBCXX_TXN_SAFE_DYN _GLIBCXX_NOTHROW override {
+        return "Reached an illegal state";
+    }
 };

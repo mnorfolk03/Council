@@ -61,7 +61,9 @@ public:
         VarType type = std::any_cast<VarType>(visit(ctx->type()));
 
         AssignVarAst *assign = any_cast<AssignVarAst *>(visit(ctx->assignVar()));
-        return NULL;
+
+
+        return new DeclareVarAst(type, assign);
     }
 
     virtual std::any visitAssignVar(CouncilParser::AssignVarContext *ctx) override {
@@ -69,7 +71,7 @@ public:
 
         ExprAst *expr = any_cast<ExprAst *>(visit(ctx->expr()));
 
-        return visitChildren(ctx);
+        return new AssignVarAst(name, expr);
     }
 
     virtual std::any visitDecFunc(CouncilParser::DecFuncContext *ctx) override {
@@ -112,13 +114,13 @@ public:
         ExprAst *left = any_cast<ExprAst *>(visit(ctx->expr(0)));
         ExprAst *right = any_cast<ExprAst *>(visit(ctx->expr(1)));
 
-        BinaryOp op = (ctx->PLUS() == NULL) ? BinaryOp::MINUS : BinaryOp::PLUS;
+        BinaryOp op = (ctx->PLUS() == nullptr) ? BinaryOp::MINUS : BinaryOp::PLUS;
 
         return (ExprAst *) new BinaryOpExprAst(left, op, right);
     }
 
     virtual std::any visitObjExpr(CouncilParser::ObjExprContext *ctx) override {
-        return visitChildren(ctx);
+        return visit(ctx->obj());
     }
 
     virtual std::any visitMultiDivExpr(CouncilParser::MultiDivExprContext *ctx) override {
@@ -201,7 +203,7 @@ public:
             blocks.push_back(any_cast<CodeBlockAst *>(visit(*blocks_it)));
         }
 
-        return new IfChain(exprs, blocks);
+        return new IfChainAst(exprs, blocks);
     }
 
     virtual std::any visitWhileLoop(CouncilParser::WhileLoopContext *ctx) override {
@@ -213,7 +215,9 @@ public:
     }
 
     virtual std::any visitObjId(CouncilParser::ObjIdContext *ctx) override {
-        return visitChildren(ctx);
+        std::string id = ctx->ID()->getText();
+
+        return (ExprAst *) new ObjIdAst(id);
     }
 
     virtual std::any visitObjLiteral(CouncilParser::ObjLiteralContext *ctx) override {
@@ -258,17 +262,17 @@ public:
     }
 
     virtual std::any visitCodeLine(CouncilParser::CodeLineContext *ctx) override {
-        if (ctx->decVar() != NULL) {
+        if (ctx->decVar() != nullptr) {
+            return (CodelineAst *) any_cast<DeclareVarAst *>(visit(ctx->decVar()));
+        } else if (ctx->assignVar() != nullptr) {
+            return (CodelineAst *) any_cast<AssignVarAst *>(visit(ctx->assignVar()));
+        } else if (ctx->funcCall() != nullptr) {
             // TODO add
-        } else if (ctx->assignVar() != NULL) {
-            // TODO
-        } else if (ctx->funcCall() != NULL) {
-            // TODO
-        } else if (ctx->returnStmt() != NULL) {
+        } else if (ctx->returnStmt() != nullptr) {
             return (CodelineAst *) any_cast<ReturnAst *>(visit(ctx->returnStmt()));
-        } else if (ctx->ifChain() != NULL) {
+        } else if (ctx->ifChain() != nullptr) {
             // TODO
-            return (CodelineAst *) any_cast<IfChain *>(visit(ctx->ifChain()));
+            return (CodelineAst *) any_cast<IfChainAst *>(visit(ctx->ifChain()));
         }
 
         logError(ParsingException("visitCodeLine, unreachable state."));

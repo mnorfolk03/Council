@@ -9,6 +9,7 @@
 #include <memory>        // unique_ptr
 #include "CouncilExceptions.h"    // NameAlreadyDeclaredException
 #include <map>
+#include <utility>
 
 // LLVM stuff
 #include "llvm/ADT/APInt.h"
@@ -151,7 +152,6 @@ namespace coun {
         BinaryOpExprAst(ExprAst *left, BinaryOp op, ExprAst *right) : op(op) {
             this->left = left;
             this->right = right;
-            inferred_type = inferBinaryOpType(left->type(), op, right->type());
         }
 
         const BinaryOp op;
@@ -166,6 +166,7 @@ namespace coun {
         virtual Value *code() {
             Value *l_val = left->code();
             Value *r_val = right->code();
+            inferred_type = inferBinaryOpType(left->type(), op, right->type());
 
             // determine what type the arguments should be
             VarType arg_type;
@@ -234,7 +235,7 @@ namespace coun {
                            : CmpInst::Predicate::FCMP_OGE;
                     return builder.CreateCmp(pred, l_val, r_val, "cmpGtEq");
             }
-            return NULL;
+            return nullptr;
         } // TODO add this
 
     private:
@@ -259,12 +260,17 @@ namespace coun {
         }
 
         Value *value() {
-            return _value;
+            return (Value *) inst;
         }
+
+        void setAlloca(AllocaInst *inst) {
+            this->inst = inst;
+        }
+
 
     private:
         VarType _type;
-        Value *_value;
+        AllocaInst *inst = nullptr;
         bool in_memory;
     };
 
@@ -273,45 +279,68 @@ namespace coun {
         std::map<std::string, VariableData *> vars;
         Scope *parent;
 
+        static Scope *active_scope;
     public:
-        VariableData *find(std::string str) {
-            if (true)
+        Scope(Scope *parent = nullptr) : parent(parent) {}
+
+        VariableData *find(const std::string &str) {
+            if (vars.contains(str)) {
+                std::cout << "HERE!" << std::endl;
                 return vars[str];
-            if (parent != NULL)
+            }
+            if (parent != nullptr)
                 return parent->find(str);
+            std::cout << "Could not findL '" << str << "'" << std::endl;
             return nullptr;
+        }
+
+        void print() {
+            std::cout << "Scope: [";
+            for (const auto &pair: vars) {
+                std::cout << pair.first;
+            }
+            std::cout << "]" << std::endl;
+        }
+
+        void insert(const std::string &str, VariableData *data) { vars[str] = data; }
+
+        static Scope *&activeScope() { return active_scope; }
+
+        static void newLevel() {
+            active_scope = new Scope(active_scope);
+            std::cout << "entering new scope" << std::endl;
+        }
+
+        static void exitToParent() {
+            Scope* parent = active_scope->parent;
+            delete active_scope;
+            active_scope = parent;
+
+            std::cout << "exiting scope to parent" << std::endl;
         }
     };
 
-/*
-    class VariableAst : public ExprAst {
-        private:
-            std::string name;
-            Scope* scope;
-        public:
-            virtual const VarType type() {
-                return scope->find(name).type();
-            }
+    Scope* Scope::active_scope = new Scope();
 
-            virtual Value* code() {
-                return nullptr;
-            }
-    };*/
-
-    class ObjId : public ExprAst {
+    class ObjIdAst : public ExprAst {
     public:
-        ObjId(Scope *scope, std::string id) : scope(scope), id(id) {}
+        ObjIdAst(std::string id) : id(std::move(id)) {}
 
         virtual const VarType type() {
-            return scope->find(id)->type();
+            VariableData *data = Scope::activeScope()->find(id);
+            std::cout << "DATA: " << data << std::endl;
+            return data->type();
         };
 
         virtual Value *code() {
-            return scope->find(id)->value();
+            VariableData *var = Scope::activeScope()->find(id);
+            Type *llvm_type = convertType(var->type());
+            Value *ret = builder.CreateLoad(llvm_type, var->value(), id);
+
+            return ret;
         };
 
     private:
-        Scope *scope;
         std::string id;
     };
 
@@ -330,20 +359,26 @@ namespace coun {
 
         virtual CodelineType type() { return CodelineType::ERROR_TYPE; };
 
-        // generate's a line, but returns nothing.
+        // generates a line, but returns nothing.
         virtual void generate_line() = 0;
     };
 
     class AssignVarAst : public CodelineAst {
     public:
-        AssignVarAst(VarType type, std::string name, ExprAst *expr) : name(name), expr(expr) {
-
-        }
+        AssignVarAst(std::string name, ExprAst *expr) : name(name), expr(expr) {}
 
         virtual CodelineType type() { return CodelineType::ASSIGN_VAR; }
 
         virtual void generate_line() {
 
+            VariableData *var = Scope::activeScope()->find(name);
+            if (var->type() != expr->type())
+                logError(MisMatchTypeException());
+            builder.CreateStore(expr->code(), var->value());
+        }
+
+        std::string id() {
+            return name;
         }
 
     private:
@@ -351,30 +386,42 @@ namespace coun {
         std::string name;
     };
 
-    // This is just used to update the listing of variable's and their
-    // types, rather than actually editing them in any way.
+// This is just used to update the listing of variable's and their
+// types, rather than actually editing them in any way.
     class DeclareVarAst : public CodelineAst {
     public:
-        DeclareVarAst(AssignVarAst *assign) : assign(assign) {
-
-        };
+        DeclareVarAst(VarType type, AssignVarAst *assign) : assign(assign), var_type(type) {};
 
         DeclareVarAst() {
             assign = nullptr;
+            var_type = VarType::MISSING_T;
         }
 
         virtual CodelineType type() { return CodelineType::DECLARE_VAR; }
 
         virtual void generate_line() {
-            if (assign != nullptr)
-                assign->generate_line();
+            if (assign == nullptr) {
+                logError(IllegalStateException());
+                return;
+            }
+            std::string id = assign->id();
+            auto *data = new VariableData(var_type);
+            Scope::activeScope()->insert(id, data);
+
+            Type *llvm_type = convertType(var_type);
+
+            AllocaInst *alloca = builder.CreateAlloca(llvm_type, nullptr, id);
+            data->setAlloca(alloca);
+
+            assign->generate_line();
         };
+
     private:
         AssignVarAst *assign;
-
+        VarType var_type;
     };
 
-    // the class used for the return line. This is important, because 
+// the class used for the return line. This is important, because
     class ReturnAst : public CodelineAst {
     public:
         ReturnAst(ExprAst *ret_val) : ret_val(ret_val) {}
@@ -401,14 +448,14 @@ namespace coun {
     public:
         CodeBlockAst(std::vector<CodelineAst *> codelines, ReturnAst *return_stmt = nullptr)
                 : codelines(codelines), return_stmt(return_stmt) {
-
         }
 
 
         BasicBlock *createBlock(Function *parent = nullptr) {
-            block = BasicBlock::Create(ctx, "blockEntry", parent);
-            std::cout << "creating block" << std::endl;
-            // TODO MORE
+            return fillBlock(BasicBlock::Create(ctx, "blockEntry", parent));
+        }
+
+        BasicBlock *fillBlock(BasicBlock *block) {
             builder.SetInsertPoint(block);
             for (auto codeline: codelines) {
                 codeline->generate_line();
@@ -416,12 +463,6 @@ namespace coun {
             if (return_stmt != nullptr)
                 builder.CreateRet(return_stmt->returnValue());
 
-            return block;
-        }
-
-        // returns the basic block if createBlock has been called,
-        // otherwise returns nullptr.
-        BasicBlock *fetchBlockIfCreated() {
             return block;
         }
 
@@ -441,7 +482,6 @@ namespace coun {
     private:
         ReturnAst *return_stmt;
         std::vector<CodelineAst *> codelines;
-        BasicBlock *block = nullptr;
     };
 
     class FunctionAst {
@@ -470,27 +510,39 @@ namespace coun {
                                            name,
                                            llvmModule);
 
-            // TODO MAKE SCOPE
+            Scope::newLevel();
 
             auto arg_types_it = arg_types.begin();
             auto arg_names_it = arg_names.begin();
 
-            // TODO fix this
+            BasicBlock *bb = BasicBlock::Create(ctx, "blockEntry", f);
+            builder.SetInsertPoint(bb);
 
             auto llvm_arg_it = f->arg_begin();
             for (; arg_names_it != arg_names.end();) {
 
 
                 llvm_arg_it->setName(*arg_names_it);
-                //TODO - DeclareVarAst(*arg_types_it, *arg_names_it);
+                auto *var = new VariableData(*arg_types_it);
+                Scope::activeScope()->insert(*arg_names_it, var);
+
+                Type *llvm_type = convertType(*arg_types_it);
+
+                AllocaInst *alloca = builder.CreateAlloca(llvm_type, nullptr, *arg_names_it);
+                var->setAlloca(alloca);
+                builder.CreateStore(&*llvm_arg_it, alloca);
+
                 arg_names_it++;
                 arg_types_it++;
                 llvm_arg_it++;
             }
+            Scope::activeScope()->print();
 
-            BasicBlock *bb = body->createBlock(f);
-            builder.SetInsertPoint(bb);
 
+            std::cout << "filling block" << std::endl;
+            body->fillBlock(bb);
+
+            Scope::exitToParent();
 
             /*
                if (body->hasReturn()) {
@@ -517,16 +569,17 @@ namespace coun {
         CodeBlockAst *body;
     };
 
-    // if statement
-    class IfChain : public CodelineAst {
+// if statement
+    class IfChainAst : public CodelineAst {
     public:
-        IfChain(std::vector<ExprAst *> exprs, std::vector<CodeBlockAst *> blocks) : exprs(exprs), blocks(blocks) {
+        IfChainAst(std::vector<ExprAst *> exprs, std::vector<CodeBlockAst *> blocks) : exprs(exprs),
+                                                                                       blocks(blocks) {
             std::cout << "made ifChain" << std::endl;
         }
 
         virtual CodelineType type() { return CodelineType::IF_CHAIN; }
 
-        virtual ~IfChain() {
+        virtual ~IfChainAst() {
             for (auto expr: exprs) {
                 delete expr;
             }
@@ -562,7 +615,8 @@ namespace coun {
                 Value *expr_value = exprs[i]->code();
                 switch (exprs[i]->type()) {
                     case VarType::INT_T:
-                        expr_value = builder.CreateICmpNE(expr_value, ConstantInt::get(ctx, llvm::APInt(32, 0, true)),
+                        expr_value = builder.CreateICmpNE(expr_value,
+                                                          ConstantInt::get(ctx, llvm::APInt(32, 0, true)),
                                                           "intToBool");
                         break;
                     case VarType::FLOAT_T:
@@ -600,54 +654,54 @@ namespace coun {
     };
 
 
-    /*
-       class VariableAst : ExprAst {
-       private:
-    //VariableAst(VarType type, const std::string& name) : type(type), name(name){}
-    const std::string name;
-    VarType varType;
+/*
+   class VariableAst : ExprAst {
+   private:
+//VariableAst(VarType type, const std::string& name) : type(type), name(name){}
+const std::string name;
+VarType var_type;
 
-    
-    class VariableAst : ExprAst {
-        private:
-            
-        public:
 
-    }
-static std::map<const std::string&, std::unique_ptr<VariableAst>> vars;
+class VariableAst : ExprAst {
+    private:
+
     public:
-    VariableAst(VarType type, const std::string& name) : varType(type), name(name){}
-    // looks up a variable and if it exists, then it is returned. Otherwise, NULL is returned
-    static std::unique_ptr<VariableAst> lookup(const std::string& name) {
-    auto it = vars.find(name);
-    if (it != vars.end())
-    return it->second;
-    return NULL;
-    }
 
-    // declares a variable of a given type. It should later be accessed by the lookup method.
-    // if this variable is already declared, an Exception will be thrown.
-    static std::unique_ptr<VariableAst> declare(VarType type,  const std::string& name){
-    auto ret = std::make_unique<VariableAst>(type, name);
-    vars[name] = std::move(ret);
-    return ret;
-    }
+}
+static std::map<const std::string&, std::unique_ptr<VariableAst>> vars;
+public:
+VariableAst(VarType type, const std::string& name) : var_type(type), name(name){}
+// looks up a variable and if it exists, then it is returned. Otherwise, NULL is returned
+static std::unique_ptr<VariableAst> lookup(const std::string& name) {
+auto it = vars.find(name);
+if (it != vars.end())
+return it->second;
+return NULL;
+}
 
-    virtual const VarType type(){return varType;}
-    };
-     */
+// declares a variable of a given type. It should later be accessed by the lookup method.
+// if this variable is already declared, an Exception will be thrown.
+static std::unique_ptr<VariableAst> declare(VarType type,  const std::string& name){
+auto ret = std::make_unique<VariableAst>(type, name);
+vars[name] = std::move(ret);
+return ret;
+}
+
+virtual const VarType type(){return var_type;}
+};
+ */
 
 
 
-    /*
-       class AssignVarAst : CodelineAst {
-       public:
+/*
+   class AssignVarAst : CodelineAst {
+   public:
 
-       AssignVarAst(const std::string& name, std::unqiue_ptr<ExprAst> expr) : expr(std::move(expr)){}
+   AssignVarAst(const std::string& name, std::unqiue_ptr<ExprAst> expr) : expr(std::move(expr)){}
 
-       private:
-       std::unique_ptr<ExprAst> expr;
-       };
-     */
+   private:
+   std::unique_ptr<ExprAst> expr;
+   };
+ */
 
 } // end of namespace
