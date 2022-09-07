@@ -285,12 +285,10 @@ namespace coun {
 
         VariableData *find(const std::string &str) {
             if (vars.contains(str)) {
-                std::cout << "HERE!" << std::endl;
                 return vars[str];
             }
             if (parent != nullptr)
                 return parent->find(str);
-            std::cout << "Could not findL '" << str << "'" << std::endl;
             return nullptr;
         }
 
@@ -312,7 +310,7 @@ namespace coun {
         }
 
         static void exitToParent() {
-            Scope* parent = active_scope->parent;
+            Scope *parent = active_scope->parent;
             delete active_scope;
             active_scope = parent;
 
@@ -320,7 +318,7 @@ namespace coun {
         }
     };
 
-    Scope* Scope::active_scope = new Scope();
+    Scope *Scope::active_scope = new Scope();
 
     class ObjIdAst : public ExprAst {
     public:
@@ -536,10 +534,8 @@ namespace coun {
                 arg_types_it++;
                 llvm_arg_it++;
             }
-            Scope::activeScope()->print();
 
 
-            std::cout << "filling block" << std::endl;
             body->fillBlock(bb);
 
             Scope::exitToParent();
@@ -574,7 +570,6 @@ namespace coun {
     public:
         IfChainAst(std::vector<ExprAst *> exprs, std::vector<CodeBlockAst *> blocks) : exprs(exprs),
                                                                                        blocks(blocks) {
-            std::cout << "made ifChain" << std::endl;
         }
 
         virtual CodelineType type() { return CodelineType::IF_CHAIN; }
@@ -589,7 +584,6 @@ namespace coun {
         }
 
         virtual void generate_line() {
-            std::cout << "if:generate_line()" << std::endl;
 
             Function *parent = builder.GetInsertBlock()->getParent();
             BasicBlock *enter_if = builder.GetInsertBlock();
@@ -633,18 +627,10 @@ namespace coun {
                     builder.CreateCondBr(expr_value, basic_blocks[i], fall_through);
                     builder.SetInsertPoint(fall_through);
                 } else { // else or if_exit
-                    std::cout << "This should execute only once!" << std::endl;
                     builder.CreateCondBr(expr_value, basic_blocks[i], basic_blocks[i + 1]);
                     builder.SetInsertPoint(basic_blocks[i + 1]);
                 }
-                std::cout << "in loop" << std::endl;
             }
-            /*
-               for (auto block : blocks){
-               builder.SetInsertPoint(block->fetchBlockIfCreated());
-               }*/
-
-            return;
         }
 
 
@@ -653,55 +639,15 @@ namespace coun {
         std::vector<CodeBlockAst *> blocks;
     };
 
-
-/*
-   class VariableAst : ExprAst {
-   private:
-//VariableAst(VarType type, const std::string& name) : type(type), name(name){}
-const std::string name;
-VarType var_type;
-
-
-class VariableAst : ExprAst {
+    class MainMethodAst {
     private:
+        CodeBlockAst *body;
 
     public:
+        MainMethodAst(CodeBlockAst *body) : body(body) {}
 
-}
-static std::map<const std::string&, std::unique_ptr<VariableAst>> vars;
-public:
-VariableAst(VarType type, const std::string& name) : var_type(type), name(name){}
-// looks up a variable and if it exists, then it is returned. Otherwise, NULL is returned
-static std::unique_ptr<VariableAst> lookup(const std::string& name) {
-auto it = vars.find(name);
-if (it != vars.end())
-return it->second;
-return NULL;
-}
-
-// declares a variable of a given type. It should later be accessed by the lookup method.
-// if this variable is already declared, an Exception will be thrown.
-static std::unique_ptr<VariableAst> declare(VarType type,  const std::string& name){
-auto ret = std::make_unique<VariableAst>(type, name);
-vars[name] = std::move(ret);
-return ret;
-}
-
-virtual const VarType type(){return var_type;}
-};
- */
-
-
-
-/*
-   class AssignVarAst : CodelineAst {
-   public:
-
-   AssignVarAst(const std::string& name, std::unqiue_ptr<ExprAst> expr) : expr(std::move(expr)){}
-
-   private:
-   std::unique_ptr<ExprAst> expr;
-   };
- */
+        void generate() {
+        }
+    };
 
 } // end of namespace

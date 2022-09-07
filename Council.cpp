@@ -3,6 +3,8 @@
 #include <string>
 
 #include "MyCouncilVisitor.h"
+#include "CouncilJit.h"
+#include "CouncilJit2.h"
 
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/FileSystem.h"
@@ -15,54 +17,53 @@
 #include "llvm/IR/LegacyPassManager.h"
 
 #include "antlr4/CouncilLexer.h"
-#include "antlr4/CouncilVisitor.h"
 #include "antlr4/CouncilParser.h"
 
 using namespace std;
 using namespace antlr4;
 
-int main(int argc, const char* argv[]){
-	string file_path;
-	if (argc < 2) {
-		cout << "Please enter a file to compile: ";
-		cin >> file_path;
-	} else {
-		file_path = argv[1];
-	}
-	ifstream stream;
-	stream.open(file_path);
-	
-	string out_path = file_path + ".out";
+int main(int argc, const char *argv[]) {
+    string file_path;
+    if (argc < 2) {
+        cout << "Please enter a file to compile: ";
+        cin >> file_path;
+    } else {
+        file_path = argv[1];
+    }
+    ifstream stream;
+    stream.open(file_path);
 
-	ANTLRInputStream input(stream);
-	CouncilLexer lexer(&input);
-	CommonTokenStream tokens(&lexer);
-	CouncilParser parser(&tokens);
+    string out_path = file_path + ".out";
 
-	CouncilParser::ParseFileContext* tree = parser.parseFile();
+    ANTLRInputStream input(stream);
+    CouncilLexer lexer(&input);
+    CommonTokenStream tokens(&lexer);
+    CouncilParser parser(&tokens);
 
-	cout << "-=- Starting Compiling -=-" << endl;
+    CouncilParser::ParseFileContext *tree = parser.parseFile();
 
-	MyCouncilVisitor visitor(out_path);
-	visitor.visitParseFile(tree);
+    cout << "-=- Starting Compiling -=-" << endl;
 
-	coun::llvmModule.dump();
+    MyCouncilVisitor visitor(out_path);
+    visitor.visitParseFile(tree);
 
-	cout << "-=-  Ending Compiling  -=-" << endl;
+    coun::llvmModule.dump();
+
+    cout << "-=-  Ending Compiling  -=-" << endl;
 
     // actually generate object file.
-	auto target_triple = sys::getDefaultTargetTriple();
+    auto target_triple = sys::getDefaultTargetTriple();
     InitializeAllTargetInfos();
     InitializeAllTargets();
     InitializeAllTargetMCs();
     InitializeAllAsmParsers();
     InitializeAllAsmPrinters();
-    
+
     string error;
     std::error_code ec;
 
     auto target = TargetRegistry::lookupTarget(target_triple, error);
-    
+
     auto cpu = "generic";
     auto features = "";
 
@@ -72,7 +73,7 @@ int main(int argc, const char* argv[]){
 
     coun::llvmModule.setDataLayout(target_machine->createDataLayout());
     coun::llvmModule.setTargetTriple(target_triple);
-    
+
     raw_fd_ostream out_file_fd(out_path, ec, sys::fs::OF_None);
     if (ec) {
         std::cout << "Could not open: " << ec.message();
@@ -85,11 +86,10 @@ int main(int argc, const char* argv[]){
         std::cout << "TargetMachine cannot emit a file of this type" << std::endl;
         return 1;
     }
-        pass.run(coun::llvmModule);
-        out_file_fd.flush();
-        std::cout << "Wrote Successfully!" << std::endl;
-    
-    
+    pass.run(coun::llvmModule);
+    out_file_fd.flush();
+    std::cout << "Wrote Successfully!" << std::endl;
 
-	return 0;
+
+    return 0;
 }

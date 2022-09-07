@@ -34,7 +34,12 @@ public:
     }
 
     virtual std::any visitParseFile(CouncilParser::ParseFileContext *ctx) override {
-        return visitChildren(ctx);
+        auto *block = any_cast<CodeBlockAst *>(visit(ctx->codeBlock()));
+        for (auto func: ctx->decFunc()) {
+            FunctionAst *ast = any_cast<FunctionAst *>(visitDecFunc(func));
+            ast->code();
+        }
+        return new MainMethodAst(block);
     }
 
     virtual std::any visitImportStmt(CouncilParser::ImportStmtContext *ctx) override {
@@ -102,7 +107,6 @@ public:
             logError(ParsingException("Funcion '" + func_name + "' may be missing return!"));
         }
         FunctionAst *func = new FunctionAst(func_name, return_type, body, param_names, param_types);
-        func->code();
         return func;
     }
 
