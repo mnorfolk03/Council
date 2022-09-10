@@ -22,21 +22,46 @@ namespace llvm::orc {
 
     class CouncilJit {
     private:
-        ExecutionSession execution_session;
+        unique_ptr<ExecutionSession> execution_session;
         RTDyldObjectLinkingLayer object_layer;
         IRCompileLayer compile_layer;
 
         DataLayout data_layout;
         MangleAndInterner mangle;
-        ThreadSafeContext ctx;
+        JITDylib &main_dylib;
 
     public:
-        CouncilJit(JITTargetMachineBuilder target_machine, DataLayout data_layout)
-                : object_layer(execution_session,
-                               []() { return std::make_unique<SectionMemoryManager>(); }), {
-            unique_ptr<IRCompileLayer::IRCompiler> ptr;
-            IRCompileLayer compile_layer(execution_session, object_layer,
-                                         std::move(ConcurrentIRCompiler(std::move(target_machine))))
+        CouncilJit(unique_ptr<ExecutionSession> session, JITTargetMachineBuilder target_machine, DataLayout data_layout)
+                : execution_session(std::move(session)),
+                  data_layout(data_layout),
+
+                  object_layer(*execution_session,
+                               []() { return std::make_unique<SectionMemoryManager>(); }),
+                  compile_layer(*execution_session, object_layer,
+                                std::make_unique<ConcurrentIRCompiler>(std::move(target_machine))),
+                  mangle(*execution_session, data_layout), main_dylib(execution_session->createBareJITDylib("<main>")) {
+        }
+
+        CouncilJit create() {
+            auto executor_process_control = SelfExecutorProcessControl::Create();
+            if (!executor_process_control)
+                throw IllegalStateException();
+            execution_session = std::make_unique<ExecutionSession>(std::move(*executor_process_control));
+
+            JITTargetMachineBuilder target_machine_builder(
+                    execution_session->getExecutorProcessControl().getTargetTriple());
+            auto data_layout = target_machine_builder.getDefaultDataLayoutForTarget();
+            if (!data_layout)
+                throw IllegalStateException();
+            return CouncilJit(std::move(execution_session), target_machine_builder, *data_layout);
+        }
+
+        const DataLayout &getDataLayout() const { return data_layout; }
+
+        Error addModule(ThreadSafeModule thread_safe_module, ResourceTrackerSP rt = nullptr) {
+            if (rt == nullptr)
+                rt = main_dylib.getDefaultResourceTracker();
+            return compile_layer.add(rt, std::move(thread_safe_module));
         }
     };
 }

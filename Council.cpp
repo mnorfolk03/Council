@@ -4,7 +4,6 @@
 
 #include "MyCouncilVisitor.h"
 #include "CouncilJit.h"
-#include "CouncilJit2.h"
 
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/FileSystem.h"
