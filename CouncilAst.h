@@ -31,9 +31,9 @@ using namespace llvm;
 
 namespace coun {
 
-    static LLVMContext ctx;
-    static IRBuilder<NoFolder> builder(ctx);
-    static Module llvmModule("Council", ctx);
+    static auto ctx = std::make_unique<LLVMContext>();
+    static IRBuilder<NoFolder> builder(*ctx);
+    static auto llvm_module = std::make_unique<Module>("Council", *ctx);
     enum VarType {
         INT_T,
         FLOAT_T,
@@ -45,14 +45,14 @@ namespace coun {
     Type *convertType(VarType type) {
         switch (type) {
             case INT_T:
-                return Type::getInt32Ty(ctx);
+                return Type::getInt32Ty(*ctx);
             case FLOAT_T:
-                return Type::getDoubleTy(ctx);
+                return Type::getDoubleTy(*ctx);
             case BOOL_T:
-                return Type::getInt1Ty(ctx);
+                return Type::getInt1Ty(*ctx);
         }
         logError(ParsingException("Unable to determine and convert type!"));
-        return Type::getInt32Ty(ctx);
+        return Type::getInt32Ty(*ctx);
     }
 
     class ExprAst {
@@ -74,7 +74,7 @@ namespace coun {
         virtual const VarType type() { return VarType::INT_T; }
 
         virtual Value *code() {
-            return ConstantInt::get(ctx, llvm::APInt(32, value, true));
+            return ConstantInt::get(*ctx, llvm::APInt(32, value, true));
         }
 
         const int value;
@@ -87,7 +87,7 @@ namespace coun {
         virtual const VarType type() { return VarType::FLOAT_T; }
 
         virtual Value *code() {
-            return ConstantFP::get(ctx, APFloat(value));
+            return ConstantFP::get(*ctx, APFloat(value));
         }
 
         const double value;
@@ -100,7 +100,7 @@ namespace coun {
         virtual const VarType type() { return VarType::BOOL_T; }
 
         virtual Value *code() {
-            return ConstantInt::getBool(ctx, value);
+            return ConstantInt::getBool(*ctx, value);
         }
 
         const bool value;
@@ -142,9 +142,9 @@ namespace coun {
         if (desired == current)
             return valuePtr;
         if (current == FLOAT_T) // float -> int
-            return builder.CreateFPToSI(valuePtr, Type::getDoubleTy(ctx), "floatToInt");
+            return builder.CreateFPToSI(valuePtr, Type::getDoubleTy(*ctx), "floatToInt");
         else // int -> float
-            return builder.CreateSIToFP(valuePtr, Type::getInt32Ty(ctx), "intToFloat");
+            return builder.CreateSIToFP(valuePtr, Type::getInt32Ty(*ctx), "intToFloat");
     }
 
     class BinaryOpExprAst : public ExprAst {
@@ -450,7 +450,7 @@ namespace coun {
 
 
         BasicBlock *createBlock(Function *parent = nullptr) {
-            return fillBlock(BasicBlock::Create(ctx, "blockEntry", parent));
+            return fillBlock(BasicBlock::Create(*ctx, "blockEntry", parent));
         }
 
         BasicBlock *fillBlock(BasicBlock *block) {
@@ -506,14 +506,14 @@ namespace coun {
             Function *f = Function::Create(ft,
                                            Function::ExternalLinkage,
                                            name,
-                                           llvmModule);
+                                           *llvm_module);
 
             Scope::newLevel();
 
             auto arg_types_it = arg_types.begin();
             auto arg_names_it = arg_names.begin();
 
-            BasicBlock *bb = BasicBlock::Create(ctx, "blockEntry", f);
+            BasicBlock *bb = BasicBlock::Create(*ctx, "blockEntry", f);
             builder.SetInsertPoint(bb);
 
             auto llvm_arg_it = f->arg_begin();
@@ -589,7 +589,7 @@ namespace coun {
             BasicBlock *enter_if = builder.GetInsertBlock();
 
             std::vector<BasicBlock *> basic_blocks;
-            BasicBlock *if_exit = BasicBlock::Create(ctx, "if_exit", parent);
+            BasicBlock *if_exit = BasicBlock::Create(*ctx, "if_exit", parent);
 
             for (auto block: blocks) {
                 basic_blocks.push_back(block->createBlock(parent));
@@ -610,11 +610,11 @@ namespace coun {
                 switch (exprs[i]->type()) {
                     case VarType::INT_T:
                         expr_value = builder.CreateICmpNE(expr_value,
-                                                          ConstantInt::get(ctx, llvm::APInt(32, 0, true)),
+                                                          ConstantInt::get(*ctx, llvm::APInt(32, 0, true)),
                                                           "intToBool");
                         break;
                     case VarType::FLOAT_T:
-                        expr_value = builder.CreateFCmpONE(expr_value, ConstantFP::get(ctx, APFloat(0.0)),
+                        expr_value = builder.CreateFCmpONE(expr_value, ConstantFP::get(*ctx, APFloat(0.0)),
                                                            "floatToBool");
                         break;
                 }
@@ -623,7 +623,7 @@ namespace coun {
                 // clause or to go to if_exit. Either way, the
                 // basicblocks[i+1] will be this desired value
                 if (i < exprs.size() - 1) {
-                    BasicBlock *fall_through = BasicBlock::Create(ctx, "fallThrough", parent);
+                    BasicBlock *fall_through = BasicBlock::Create(*ctx, "fallThrough", parent);
                     builder.CreateCondBr(expr_value, basic_blocks[i], fall_through);
                     builder.SetInsertPoint(fall_through);
                 } else { // else or if_exit
@@ -631,6 +631,7 @@ namespace coun {
                     builder.SetInsertPoint(basic_blocks[i + 1]);
                 }
             }
+            builder.SetInsertPoint(if_exit);
         }
 
 
@@ -647,6 +648,10 @@ namespace coun {
         MainMethodAst(CodeBlockAst *body) : body(body) {}
 
         void generate() {
+            FunctionType *ft = FunctionType::get(convertType(VarType::INT_T), false);
+            Function *f = Function::Create(ft, Function::ExternalLinkage, "main", *llvm_module);
+            BasicBlock *basic_block = body->createBlock(f);
+            verifyFunction(*f);
         }
     };
 

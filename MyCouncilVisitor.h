@@ -39,7 +39,9 @@ public:
             FunctionAst *ast = any_cast<FunctionAst *>(visitDecFunc(func));
             ast->code();
         }
-        return new MainMethodAst(block);
+        MainMethodAst *main = new MainMethodAst(block);
+        main->generate();
+        return main;
     }
 
     virtual std::any visitImportStmt(CouncilParser::ImportStmtContext *ctx) override {

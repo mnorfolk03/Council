@@ -42,11 +42,11 @@ namespace llvm::orc {
                   mangle(*execution_session, data_layout), main_dylib(execution_session->createBareJITDylib("<main>")) {
         }
 
-        CouncilJit create() {
+        static CouncilJit create() {
             auto executor_process_control = SelfExecutorProcessControl::Create();
             if (!executor_process_control)
                 throw IllegalStateException();
-            execution_session = std::make_unique<ExecutionSession>(std::move(*executor_process_control));
+            auto execution_session = std::make_unique<ExecutionSession>(std::move(*executor_process_control));
 
             JITTargetMachineBuilder target_machine_builder(
                     execution_session->getExecutorProcessControl().getTargetTriple());
@@ -58,10 +58,16 @@ namespace llvm::orc {
 
         const DataLayout &getDataLayout() const { return data_layout; }
 
-        Error addModule(ThreadSafeModule thread_safe_module, ResourceTrackerSP rt = nullptr) {
+        JITDylib &getMainJitDylib() { return main_dylib; }
+
+        Error addModule(ThreadSafeModule& thread_safe_module, ResourceTrackerSP rt = nullptr) {
             if (rt == nullptr)
                 rt = main_dylib.getDefaultResourceTracker();
             return compile_layer.add(rt, std::move(thread_safe_module));
+        }
+
+        JITEvaluatedSymbol lookUp(std::string name) {
+            return *execution_session->lookup({&main_dylib}, mangle(name));
         }
     };
 }

@@ -39,18 +39,6 @@ int main(int argc, const char *argv[]) {
     CommonTokenStream tokens(&lexer);
     CouncilParser parser(&tokens);
 
-    CouncilParser::ParseFileContext *tree = parser.parseFile();
-
-    cout << "-=- Starting Compiling -=-" << endl;
-
-    MyCouncilVisitor visitor(out_path);
-    visitor.visitParseFile(tree);
-
-    coun::llvmModule.dump();
-
-    cout << "-=-  Ending Compiling  -=-" << endl;
-
-    // actually generate object file.
     auto target_triple = sys::getDefaultTargetTriple();
     InitializeAllTargetInfos();
     InitializeAllTargets();
@@ -58,6 +46,36 @@ int main(int argc, const char *argv[]) {
     InitializeAllAsmParsers();
     InitializeAllAsmPrinters();
 
+    orc::CouncilJit jit = orc::CouncilJit::create();
+    coun::llvm_module->setDataLayout(jit.getDataLayout());
+
+    CouncilParser::ParseFileContext *tree = parser.parseFile();
+
+    cout << "-=- Starting Compiling -=-" << endl;
+
+    MyCouncilVisitor visitor(out_path);
+    visitor.visitParseFile(tree);
+
+    coun::llvm_module->dump();
+
+    cout << "-=-  Ending Compiling  -=-" << endl;
+
+    // actually generate object file.
+
+
+    if (true) {
+
+
+        auto thread_safe_module = orc::ThreadSafeModule(std::move(llvm_module), std::move(ctx));
+        jit.addModule(thread_safe_module);
+        auto main_symbol = jit.lookUp("main");
+        auto main_func = (int (*)()) main_symbol.getAddress();
+        int ret_val = main_func();
+        cout << "Ret Val: " << ret_val << std::endl;
+        return 0;
+    }
+
+    // Generating code
     string error;
     std::error_code ec;
 
@@ -70,8 +88,8 @@ int main(int argc, const char *argv[]) {
     auto RM = Optional<Reloc::Model>();
     auto target_machine = target->createTargetMachine(target_triple, cpu, features, opt, RM);
 
-    coun::llvmModule.setDataLayout(target_machine->createDataLayout());
-    coun::llvmModule.setTargetTriple(target_triple);
+    coun::llvm_module->setDataLayout(target_machine->createDataLayout());
+    coun::llvm_module->setTargetTriple(target_triple);
 
     raw_fd_ostream out_file_fd(out_path, ec, sys::fs::OF_None);
     if (ec) {
@@ -85,7 +103,7 @@ int main(int argc, const char *argv[]) {
         std::cout << "TargetMachine cannot emit a file of this type" << std::endl;
         return 1;
     }
-    pass.run(coun::llvmModule);
+    pass.run(*coun::llvm_module);
     out_file_fd.flush();
     std::cout << "Wrote Successfully!" << std::endl;
 
